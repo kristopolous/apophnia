@@ -6,6 +6,6 @@ package:
 	make clean
 	cd ../ && tar czf images.tgz images
 clean:
-	rm -rf *.o */*.o images *~ */*.so
+	rm -rf *.o */*.o images *~ */*.so */*.a
 install:
 	install image /usr/local/bin/
