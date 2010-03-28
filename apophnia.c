@@ -15,35 +15,24 @@
 
 #include <wand/MagickWand.h>
 #include "mongoose/mongoose.h"
-#include "credis/credis.h"
 #include "cjson/cJSON.h"
 
-#define CONFIG "images.conf"
+#define CONFIG "apophnia.conf"
 
-REDIS g_redis; 
 cJSON *g_config;
 MagickWand *g_magick;
 
 struct {
 	char img_root[PATH_MAX];
-	char redis_host[PATH_MAX];
-	int redis_port;
 	unsigned int port;
-
-	int ttl;	// in sec ... max ttl = 68.0961 yrs
-	int maxmem;	// in KiB ... max mem = 2 TiB
 } g_opts;
 
 struct { char*arg;
 	void*param;
 	int type;
 } args[] = {
-	{ "redis_host", &g_opts.redis_host, cJSON_String },
-	{ "redis_port", &g_opts.redis_port, cJSON_Number },
 	{ "img_root", &g_opts.img_root, cJSON_String },
-	{ "ttl", &g_opts.ttl, cJSON_Number },
-	{ "port", &g_opts.port, cJSON_Number },
-	{ "maxmem", &g_opts.maxmem, cJSON_Number }
+	{ "port", &g_opts.port, cJSON_Number }
 };
 
 void fatal(const char*t, ...) {
@@ -77,11 +66,11 @@ void fatal(const char*t, ...) {
 	exit(0);
 }
 
-unsigned char* convert_image(char* file, int height, int width, size_t*sz){
+unsigned char* convert_image(int fd, int height, int width, size_t*sz){
 	MagickBooleanType stat;
+	FILE *fdesc = fdopen(fd, "rb");
 
-	printf("Opening %s\n", file);
-	stat = MagickReadImage(g_magick, file);
+	stat = MagickReadImageFile(g_magick, fdesc);
 
 	if (stat == MagickFalse) {
 		return 0;
@@ -89,7 +78,7 @@ unsigned char* convert_image(char* file, int height, int width, size_t*sz){
 
 	MagickResetIterator(g_magick);
 
-	printf("Converting %s\n", file);
+	printf("Converting ...\n");
 	while (MagickNextImage(g_magick) != MagickFalse) {
 		MagickResizeImage(
 				g_magick,
@@ -102,65 +91,144 @@ unsigned char* convert_image(char* file, int height, int width, size_t*sz){
 	return MagickGetImageBlob(g_magick, sz);
 }
 
+int parse_dimensions(char*ptr, int*height, int*width) {
+	char * last;
+	*height = -1;
+	*width = -1;
+	for(last = ptr;;ptr++) {
+		if(ptr[0] >= '0' && ptr[0] <= '9') {
+			continue;
+		}
+		if(ptr[0] == 'x') {
+			ptr[0] = 0;
+			*height = atoi(last);
+			ptr[0] = 'x';
+			last = ptr + 1;
+			continue;
+		}
+		if(ptr[0] <= 32) {
+			ptr[0] = 0;
+			*width = atoi(last);
+			ptr[0] = ':';
+			if(*height == -1) {
+				*height = *width;
+			}
+			ptr++;
+			break;
+		}
+	}
+	return 1;
+}
+
+#define BUFSIZE	16384
 static void show_image(struct mg_connection *conn,
 		const struct mg_request_info *request_info,
 		void *user_data) {
 
-	int height = -1, width = -1, ret;	
-	char *file, *ptr, *last, *key;
+	int  ret, fd = -1, height, width;
+
+	char fname[PATH_MAX];
+	char buf[BUFSIZE];
+
+	char *commandList[12], **pCommand = commandList, **pTmp;
+
+	char *ptr, *last, *ext = 0;
 	unsigned char *image;
-	char *b64;
+
+	struct stat st;
 	size_t sz;
+      	
+	
+	// first we try to just blindly open the requested file
+	ptr = request_info->uri + 1;
+	
+	strcpy(fname, ptr);
 
-	key = ptr = request_info->uri + 1;
-	ret = credis_get(g_redis, key, &b64);
-	if(ret != -1) {
-		image = g_base64_decode(b64, &sz);
-	} else {
-		for(last = ptr;;ptr++) {
-			if(ptr[0] >= '0' && ptr[0] <= '9') {
-				continue;
-			}
-			if(ptr[0] == 'x') {
-				ptr[0] = 0;
-				height = atoi(last);
-				ptr[0] = 'x';
-				last = ptr + 1;
-				continue;
-			}
-			if(ptr[0] == ':') {
-				ptr[0] = 0;
-				width = atoi(last);
-				ptr[0] = ':';
-				if(height == -1) {
-					height = width;
-				}
-				ptr++;
-				break;
-			}
-			if(ptr[0] <= 32) {
-				break;
-			}
-		}
-		file = ptr;
+	do {
+		fd = open(ptr, O_RDONLY);
 		
-		image = convert_image(file, height, width, &sz);
-		if(!image) {
-			mg_printf(conn, "%s", "HTTP/1.1 404 NOT FOUND\r\n");
+		if(fd > 0) {
+			break;
 		}
-		printf("Saving %s in Redis\n", key);
-		b64 = g_base64_encode(image, sz);
-		credis_set(g_redis, key, b64);
-		credis_expire(g_redis, key, g_opts.ttl);
-	}
 
-	mg_printf(conn, "%s", "HTTP/1.1 200 OK\r\n");
-	mg_printf(conn, "%s", "Content-Type: image/jpeg\r\n");
-	mg_printf(conn, "Content-Length: %d\r\n", sz);
-	mg_printf(conn, "%s", "Connection: Close\r\n\r\n");
-	mg_write(conn, image, sz);
-	if(ret == -1) {
-		MagickRelinquishMemory(image);
+		// we start the string parsing routines.
+		last = ptr + strlen(ptr);
+
+		// this passes over the string ^^ once and then VV twice
+
+		// get the extension
+		for(; (last > ptr) && (*last != '.'); last--);
+		
+		if(last[0] == '.') {
+			ext = last;
+		} else {
+			break;
+		}
+
+		for(;;) {
+			// find the first clause to try to dump
+			for(; (last > ptr) && (*last != '_'); last--);
+
+			printf("%s\n",last);
+			if(last[0] == '_') {
+				*pCommand = last + 1;
+				pCommand++;
+				strcpy(fname + (last - ptr), ext);
+				printf("Trying %s\n", fname);
+				fd = open(fname, O_RDONLY);
+				if(fd > 0) {
+					break;
+				}
+			} else {
+				// we must give up eventually
+				break;
+			}
+		} 
+	} while(0);
+
+	// we have a file handle
+	if(fd > 0) {
+		if(fstat(fd, &st)) {
+			mg_printf(conn, "%s", "HTTP/1.1 404 NOT FOUND\r\n");
+			return;
+		}
+
+		mg_printf(conn, "%s", "HTTP/1.1 200 OK\r\n");
+		mg_printf(conn, "%s", "Content-Type: image/jpeg\r\n");
+		mg_printf(conn, "%s", "Connection: Close\r\n");
+		// if this is the case then we have a command string to parse
+		if(pCommand != commandList) {
+			
+			// get the full requested name
+			strcpy(fname, ptr);
+
+			// now null out the extension pointer from above
+			// we won't need it any more
+			ext[0] = 0;
+			for(pTmp = commandList; pTmp != pCommand; pTmp++) {
+				printf("Command: [%s]\n", *pTmp);
+				parse_dimensions(*pTmp, &height, &width);
+				printf("height: %d\nwidth: %d\n", height, width);
+
+				image = convert_image(fd, height, width, &sz);
+			}
+			mg_printf(conn, "Content-Length: %d\r\n\r\n", sz);
+			mg_write(conn, image, sz);
+			MagickWriteImage(g_magick, fname);
+			MagickRelinquishMemory(image);
+		} else {
+			mg_printf(conn, "Content-Length: %d\r\n\r\n", st.st_size);
+			for(;;) {	
+				ret = read(fd, buf, BUFSIZE);
+				if(!ret) {
+					break;
+				}
+				mg_write(conn, buf, ret);
+			}
+		}
+		
+	} else {
+		mg_printf(conn, "%s", "HTTP/1.1 404 NOT FOUND\r\n");
 	}
 }
 
@@ -195,10 +263,6 @@ int read_config(){
 	g_config = ptr = cJSON_Parse((const char*)config);
 
 	g_opts.port = 2345;
-	g_opts.redis_port = 6379;
-	g_opts.ttl = 60;
-	g_opts.maxmem = 1000 * 1000;
-	strcpy(g_opts.redis_host, "localhost");
 	strcpy(g_opts.img_root, "./");
 
 	len = sizeof(args);
@@ -219,8 +283,6 @@ int read_config(){
 		}
 	}
 	printf(" Port: %d \n", g_opts.port);
-	printf(" Maximum memory: %d KiB\n", g_opts.maxmem);
-	printf(" TTL: %d seconds\n", g_opts.ttl);
 	printf(" Image Root: %s\n", g_opts.img_root);
 
 	munmap(start, st.st_size);
@@ -257,13 +319,6 @@ int main() {
 
 	printf("Starting Mongoose\n");
        	ctx = mg_start();
-
-	printf ("Connecting to Redis @ %s:%d...", g_opts.redis_host, g_opts.redis_port);
-	g_redis = credis_connect(g_opts.redis_host, g_opts.redis_port, 10000);
-	if(!g_redis) {
-		fatal ("Couldn't connect to Redis");
-	}
-	printf("OK\n");
 
 	printf("Initializing ImageMagick\n");
 	MagickWandGenesis();
