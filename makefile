@@ -1,11 +1,11 @@
-CFLAGS= `pkg-config --cflags Wand` `pkg-config --cflags glib-2.0` -Wall -O2 -march=pentium4
-LDFLAGS= `pkg-config --libs Wand` `pkg-config --libs glib-2.0` -lpthread -lm -ldl -s
-images: images.o mongoose/mongoose.o credis/credis.o cjson/cJSON.o 
+CFLAGS= `pkg-config --cflags Wand` -Wall -O2 -march=pentium4
+LDFLAGS= `pkg-config --libs Wand` -lpthread -lm -ldl -s
+apophnia: apophnia.o mongoose/mongoose.o cjson/cJSON.o 
 
 package:
 	make clean
-	cd ../ && tar czf images.tgz images
+	cd ../ && tar czf apophnia.tgz apophnia
 clean:
-	rm -rf *.o */*.o images *~ */*.so */*.a
+	rm -rf *.o */*.o apophnia *~ */*.so */*.a
 install:
 	install image /usr/local/bin/

@@ -11,7 +11,6 @@
 #include <linux/types.h>
 #include <stdint.h>
 #include <string.h>
-#include <glib.h>
 
 #include <wand/MagickWand.h>
 #include "mongoose/mongoose.h"
@@ -24,15 +23,31 @@ MagickWand *g_magick;
 
 struct {
 	char img_root[PATH_MAX];
+	char squash;
 	unsigned int port;
 } g_opts;
 
-struct { char*arg;
+struct { 
+	char*arg;
+	char*string;
 	void*param;
 	int type;
 } args[] = {
-	{ "img_root", &g_opts.img_root, cJSON_String },
-	{ "port", &g_opts.port, cJSON_Number }
+	{ "img_root", "Image Root", &g_opts.img_root, cJSON_String },
+	{ "squash", "Squash images", &g_opts.squash, cJSON_Number },
+	{ "port", "Mongoose Port", &g_opts.port, cJSON_Number },
+	{ 0, 0, 0, 0}
+};
+
+struct {
+	char *pfix;
+	char *name;
+} directives[] = {
+	{ "r", "Resize" },
+	{ "o", "Offset" },
+	{ "f", "Format Change" },
+	{ "q", "Quality" },
+	{ 0, 0 }
 };
 
 void fatal(const char*t, ...) {
@@ -169,7 +184,6 @@ static void show_image(struct mg_connection *conn,
 			// find the first clause to try to dump
 			for(; (last > ptr) && (*last != '_'); last--);
 
-			printf("%s\n",last);
 			if(last[0] == '_') {
 				*pCommand = last + 1;
 				pCommand++;
@@ -265,25 +279,24 @@ int read_config(){
 	g_opts.port = 2345;
 	strcpy(g_opts.img_root, "./");
 
-	len = sizeof(args);
-	for(ix = 0; ix < len; ix ++) {
+	for(ix = 0; args[ix].arg; ix ++) {
 		element = cJSON_GetObjectItem(ptr, args[ix].arg);
 		if(element) {
 			if(element->type == args[ix].type) {
 				switch(args[ix].type) {
 					case cJSON_String:
 						strncpy((char*)args[ix].param, element->valuestring, PATH_MAX);
+						printf(" %s: %s\n", args[ix].string, element->valuestring);
 						break;
 
 					case cJSON_Number:
 						((int*)args[ix].param)[0] = element->valueint;
+						printf(" %s: %d\n", args[ix].string, element->valueint);
 						break;
 				}
 			}
 		}
 	}
-	printf(" Port: %d \n", g_opts.port);
-	printf(" Image Root: %s\n", g_opts.img_root);
 
 	munmap(start, st.st_size);
 	close(fd);
@@ -292,6 +305,10 @@ int read_config(){
 		fatal("Couldn't change directories to %s",g_opts.img_root);
 	}
 
+	printf ("Directives:\n");
+	for(ix = 0; directives[ix].pfix; ix ++) {
+		printf(" [%s] %s\n", directives[ix].pfix, directives[ix].name);
+	}
 	return 1;
 }
 
@@ -312,22 +329,20 @@ char*itoa(int in) {
 int main() {
 	struct mg_context *ctx;
 
-	printf("Reading Configuration\n");
+	printf ("Starting Apophnia...\n");
 	if(!read_config()) {
 		fatal("Unable to read the config");
 	}
 
-	printf("Starting Mongoose\n");
        	ctx = mg_start();
 
-	printf("Initializing ImageMagick\n");
 	MagickWandGenesis();
 	g_magick = NewMagickWand();
 
 	mg_set_option(ctx, "ports", itoa(g_opts.port));
 	mg_set_uri_callback(ctx, "/*", &show_image, NULL);
 
-	printf("[Ready!]\n");
+	printf("Ready\n");
 
 	getchar();
 	return 0;
