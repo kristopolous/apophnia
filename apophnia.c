@@ -105,6 +105,30 @@ void (*plog2)(const char*t, ...);
 void (*plog3)(const char*t, ...);
 
 void log_real(const char*t, ...) {
+	va_list ap;
+	char *s;
+	va_start(ap, t);
+
+	while(*t) {
+		if(*t == '%') {
+			t++;
+			if(*t == 's') {
+				s = (char*) va_arg(ap, char *);
+				if(!s) {
+					printf("<null>");
+				} else {
+					printf("%s", s);
+				}
+			} else if(*t == 'd') {
+				printf("%d", (int) va_arg(ap, int));
+			}
+		} else {
+			putchar(t[0]);
+		}
+		t++;
+	}
+	va_end(ap);
+	printf ("\n");
 }
 
 void log_fake(const char*t, ...) {
@@ -162,8 +186,44 @@ unsigned char* image_end(size_t *sz) {
 	return MagickGetImageBlob(g_magick, sz);
 }
 
+#define ASSERT_CHAR(ptr, chr) ((ptr[0] == chr) && ptr++)
+int atoi_ptr(char**ptr) {
+	char *local;
+	int out = 0, mult = 1;
+
+	local = *ptr;
+	if(local[0] == 'm') {
+		local++;
+		mult = -1;
+	} else if (local[0] == 'p') {
+		local++;
+	}
+	for(;; local++) {
+		if(local[0] >= '0' && local[0] <= '9') {
+			out *= 10;
+			out += local[0] - '0';
+		} else {
+			break;
+		}
+	}
+	*ptr = local;
+	return out * mult;
+}
+
 int image_offset(char*ptr){
-	return 1;
+	int offsetY, offsetX, height, width;
+
+	height = atoi_ptr(&ptr);
+	if(!ASSERT_CHAR(ptr, 'x')) {
+		printf("%s\n", ptr);
+		return 0;
+	}
+	width = atoi_ptr(&ptr);
+
+	offsetY = atoi_ptr(&ptr);
+	offsetX = atoi_ptr(&ptr);
+
+	return MagickChopImage(g_magick, width, height, offsetX, offsetY);
 }
 
 int image_quality(char*ptr) {
@@ -173,6 +233,7 @@ int image_quality(char*ptr) {
 
 	return 1;
 }
+
 int image_resize(char*ptr) {
 	char * last;
 
