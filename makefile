@@ -1,5 +1,5 @@
-CFLAGS= `pkg-config --cflags Wand` -Wall -O2 -march=pentium4
-LDFLAGS= `pkg-config --libs Wand` -lpthread -lm -ldl -s
+CFLAGS= `pkg-config --cflags Wand` -Wall -gstabs+ -ggdb -march=pentium4
+LDFLAGS= `pkg-config --libs Wand` -lpthread -lm -ldl 
 apophnia: apophnia.o mongoose/mongoose.o cjson/cJSON.o 
 
 package:

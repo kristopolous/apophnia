@@ -7,16 +7,21 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <linux/limits.h>
-#include <linux/types.h>
 #include <stdint.h>
 #include <string.h>
+
+#ifdef __linux__ // {
+	#include <sys/inotify.h>
+	#include <linux/limits.h>
+	#include <linux/types.h>
+#endif	// __linux__ }
 
 #include <wand/MagickWand.h>
 #include "mongoose/mongoose.h"
 #include "cjson/cJSON.h"
 
 #define CONFIG "apophnia.conf"
+#define BUFSIZE	16384
 
 cJSON *g_config;
 MagickWand *g_magick;
@@ -71,6 +76,18 @@ struct {
 	{ D_OFFSET, "Offset" },
 	{ D_QUALITY, "Quality" },
 	{ 0, 0 }
+};
+
+struct {
+	char 	*extension,
+		*fallbacks[8];
+} formatCheck[] = {
+	{ "jpg", { "jpeg", "png", "bmp", "gif", "tga", "tiff", 0 } },
+	{ "png", { "gif", "bmp", "jpg", "jpeg", "tiff", 0 } },
+	{ "gif", { "png", "bmp", "jpg", "jpeg", 0 } },
+	{ "jpeg", { "jpg", "png", "bmp", "gif", "tga", "tiff", 0 } },
+	{ "bmp", { "png", "jpg", "gif", "jpeg", 0 } },
+	{ 0, { 0 } }
 };
 
 void (*plog0)(const char*t, ...);
@@ -144,6 +161,9 @@ unsigned char* convert_image(int fd, int height, int width, size_t*sz){
 int image_offset(char*ptr){
 	return 1;
 }
+int image_quality() {
+	return 1;
+}
 int image_resize(char*ptr, int*height, int*width) {
 	char * last;
 	*height = -1;
@@ -171,19 +191,27 @@ int image_resize(char*ptr, int*height, int*width) {
 	return 1;
 }
 
-#define BUFSIZE	16384
 static void show_image(struct mg_connection *conn,
 		const struct mg_request_info *request_info,
 		void *user_data) {
 
-	int  ret, fd = -1, height, width;
+	int ret,
+	    fd = -1; 
+	
+	int height, 
+	    width;
 
-	char fname[PATH_MAX];
-	char buf[BUFSIZE];
+	char fname[PATH_MAX],
+	     buf[BUFSIZE];
 
-	char *commandList[12], **pCommand = commandList, **pTmp;
+	char *commandList[12], 
+	     **pCommand = commandList, 
+	     **pTmp;
 
-	char *ptr, *last, *ext = 0;
+	char *ptr, 
+	     *last, 
+	     *ext = 0;
+
 	unsigned char *image;
 
 	struct stat st;
@@ -267,6 +295,7 @@ static void show_image(struct mg_connection *conn,
 						break;
 
 					case D_QUALITY:
+						image_quality();
 						break;
 
 					default:
@@ -332,6 +361,7 @@ int read_config(){
 
 	strcpy(g_opts.img_root, "./");
 
+	plog3 = plog2 = plog1 = log_fake;
 	for(ix = 0; args[ix].arg; ix ++) {
 		element = cJSON_GetObjectItem(ptr, args[ix].arg);
 		if(element) {
@@ -367,7 +397,6 @@ int read_config(){
 	}
 
 	// set up the logs
-	plog3 = plog2 = plog1 = log_fake;
 	switch(g_opts.log_level) {
 		case 3:
 			plog3 = log_real;
@@ -390,6 +419,7 @@ int read_config(){
 char*itoa(int in) {
 	static char ret[12],
 		    *ptr;
+
        	memset(ret,0,12);
 	ptr = ret + 11;
 
@@ -401,6 +431,7 @@ char*itoa(int in) {
 
 	return ptr;
 }
+
 int main() {
 	struct mg_context *ctx;
 
