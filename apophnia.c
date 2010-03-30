@@ -22,9 +22,13 @@ cJSON *g_config;
 MagickWand *g_magick;
 
 struct {
-	char img_root[PATH_MAX];
-	char squash;
-	unsigned int port;
+	char img_root[PATH_MAX],
+	     propotion,
+	     true_bmp;
+
+	int 	port,
+		log_fd,
+		log_level;
 } g_opts;
 
 struct { 
@@ -33,22 +37,53 @@ struct {
 	void*param;
 	int type;
 } args[] = {
-	{ "img_root", "Image Root", &g_opts.img_root, cJSON_String },
-	{ "squash", "Squash images", &g_opts.squash, cJSON_Number },
 	{ "port", "Mongoose Port", &g_opts.port, cJSON_Number },
-	{ 0, 0, 0, 0}
+	{ "img_root", "Image Root", &g_opts.img_root, cJSON_String },
+	{ "propotion", "Proportion", &g_opts.propotion, cJSON_String },
+	{ "true_bmp", "True BMP", &g_opts.true_bmp, cJSON_Number },
+	{ "no_support", "Proportion", &g_opts.img_root, cJSON_String },
+	{ "log_level", "Log Level", &g_opts.log_level, cJSON_Number },
+	{ "log_file", "Log File", &g_opts.log_fd, cJSON_String },
+	{ 0, 0, 0, 0 }
 };
 
+#define P_SQUASH	0
+#define P_CROP		1
+#define P_MATTE		2
+#define P_SEAM		3
+const char * proportion[] = {
+	"squash",
+	"crop",
+	"matte",
+	"seamcarve",
+	0
+};
+
+#define D_RESIZE	'r'
+#define D_OFFSET	'o'
+#define D_QUALITY	'q'
+
 struct {
-	char *pfix;
+	char pfix;
 	char *name;
 } directives[] = {
-	{ "r", "Resize" },
-	{ "o", "Offset" },
-	{ "f", "Format Change" },
-	{ "q", "Quality" },
+	{ D_RESIZE, "Resize" },
+	{ D_OFFSET, "Offset" },
+	{ D_QUALITY, "Quality" },
 	{ 0, 0 }
 };
+
+void (*plog0)(const char*t, ...);
+void (*plog1)(const char*t, ...);
+void (*plog2)(const char*t, ...);
+void (*plog3)(const char*t, ...);
+
+void log_real(const char*t, ...) {
+}
+
+void log_fake(const char*t, ...) {
+	return;
+}
 
 void fatal(const char*t, ...) {
 	va_list ap;
@@ -93,7 +128,7 @@ unsigned char* convert_image(int fd, int height, int width, size_t*sz){
 
 	MagickResetIterator(g_magick);
 
-	printf("Converting ...\n");
+	plog3("Converting ...\n");
 	while (MagickNextImage(g_magick) != MagickFalse) {
 		MagickResizeImage(
 				g_magick,
@@ -106,7 +141,10 @@ unsigned char* convert_image(int fd, int height, int width, size_t*sz){
 	return MagickGetImageBlob(g_magick, sz);
 }
 
-int parse_dimensions(char*ptr, int*height, int*width) {
+int image_offset(char*ptr){
+	return 1;
+}
+int image_resize(char*ptr, int*height, int*width) {
 	char * last;
 	*height = -1;
 	*width = -1;
@@ -122,9 +160,7 @@ int parse_dimensions(char*ptr, int*height, int*width) {
 			continue;
 		}
 		if(ptr[0] <= 32) {
-			ptr[0] = 0;
 			*width = atoi(last);
-			ptr[0] = ':';
 			if(*height == -1) {
 				*height = *width;
 			}
@@ -188,7 +224,7 @@ static void show_image(struct mg_connection *conn,
 				*pCommand = last + 1;
 				pCommand++;
 				strcpy(fname + (last - ptr), ext);
-				printf("Trying %s\n", fname);
+				plog3("Trying %s\n", fname);
 				fd = open(fname, O_RDONLY);
 				if(fd > 0) {
 					break;
@@ -220,9 +256,25 @@ static void show_image(struct mg_connection *conn,
 			// we won't need it any more
 			ext[0] = 0;
 			for(pTmp = commandList; pTmp != pCommand; pTmp++) {
-				printf("Command: [%s]\n", *pTmp);
-				parse_dimensions(*pTmp, &height, &width);
-				printf("height: %d\nwidth: %d\n", height, width);
+				plog3("Command: [%s]\n", *pTmp);
+				switch(*pTmp[0]) {
+					case D_RESIZE:
+						image_resize(*(pTmp + 1), &height, &width);
+						break;
+
+					case D_OFFSET:
+						image_offset(*(pTmp + 1));
+						break;
+
+					case D_QUALITY:
+						break;
+
+					default:
+						plog2("Unknown directive: %s", *pTmp);
+						break;
+				}	
+
+				plog3("height: %d\nwidth: %d\n", height, width);
 
 				image = convert_image(fd, height, width, &sz);
 			}
@@ -254,7 +306,6 @@ int read_config(){
 		*element = 0;
 
 	int 	ix = 0, 
-		len = 0,
 		fd = -1;
 
 	struct stat st;
@@ -277,6 +328,8 @@ int read_config(){
 	g_config = ptr = cJSON_Parse((const char*)config);
 
 	g_opts.port = 2345;
+	g_opts.log_level = 0;
+
 	strcpy(g_opts.img_root, "./");
 
 	for(ix = 0; args[ix].arg; ix ++) {
@@ -285,17 +338,43 @@ int read_config(){
 			if(element->type == args[ix].type) {
 				switch(args[ix].type) {
 					case cJSON_String:
-						strncpy((char*)args[ix].param, element->valuestring, PATH_MAX);
-						printf(" %s: %s\n", args[ix].string, element->valuestring);
+						if(!strcmp(args[ix].arg, "proportion")) {
+							for(ix = 0; proportion[ix]; ix ++) {
+								if(!strcmp(proportion[ix], element->valuestring)) {
+									((char*)args[ix].param)[0] = ix;
+									break;
+								}
+							}
+						} else if(!strcmp(args[ix].arg, "log_file")) {
+							g_opts.log_fd = open(element->valuestring, O_WRONLY);
+							if(!g_opts.log_fd) {
+								g_opts.log_fd = open("/dev/stdout", O_WRONLY);
+								plog0("Couldn't open log file");
+							}
+						} else {
+							strncpy((char*)args[ix].param, element->valuestring, PATH_MAX);
+							plog3(" %s: %s\n", args[ix].string, element->valuestring);
+						}
 						break;
 
 					case cJSON_Number:
 						((int*)args[ix].param)[0] = element->valueint;
-						printf(" %s: %d\n", args[ix].string, element->valueint);
+						plog3(" %s: %d\n", args[ix].string, element->valueint);
 						break;
 				}
 			}
 		}
+	}
+
+	// set up the logs
+	plog3 = plog2 = plog1 = log_fake;
+	switch(g_opts.log_level) {
+		case 3:
+			plog3 = log_real;
+		case 2:
+			plog2 = log_real;
+		case 1:
+			plog1 = log_real;
 	}
 
 	munmap(start, st.st_size);
@@ -305,10 +384,6 @@ int read_config(){
 		fatal("Couldn't change directories to %s",g_opts.img_root);
 	}
 
-	printf ("Directives:\n");
-	for(ix = 0; directives[ix].pfix; ix ++) {
-		printf(" [%s] %s\n", directives[ix].pfix, directives[ix].name);
-	}
 	return 1;
 }
 
@@ -329,9 +404,10 @@ char*itoa(int in) {
 int main() {
 	struct mg_context *ctx;
 
-	printf ("Starting Apophnia...\n");
+	plog0 = log_real;
+	plog0("Starting Apophnia...");
 	if(!read_config()) {
-		fatal("Unable to read the config");
+		plog0("Unable to read the config");
 	}
 
        	ctx = mg_start();
@@ -341,8 +417,6 @@ int main() {
 
 	mg_set_option(ctx, "ports", itoa(g_opts.port));
 	mg_set_uri_callback(ctx, "/*", &show_image, NULL);
-
-	printf("Ready\n");
 
 	getchar();
 	return 0;
