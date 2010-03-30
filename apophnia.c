@@ -14,7 +14,13 @@
 	#include <sys/inotify.h>
 	#include <linux/limits.h>
 	#include <linux/types.h>
-#endif	// __linux__ }
+	#define NOTIFY_INIT	inotify_init()
+	#define EVENT_SIZE  (sizeof (struct inotify_event))
+	#define BUF_LEN      (1024 * (EVENT_SIZE + 16))
+#elif defined (__OpenBSD__ || __FreeBSD__ || __NetBSD__ || __APPLE__) // {
+	#include <sys/event.h>
+	#define NOTIFY_INIT	kqueue()
+#endif
 
 #include <wand/MagickWand.h>
 #include "mongoose/mongoose.h"
@@ -25,6 +31,9 @@
 
 cJSON *g_config;
 MagickWand *g_magick;
+
+int g_notify_handle, 
+    g_notify;
 
 struct {
 	char img_root[PATH_MAX],
@@ -133,61 +142,69 @@ void fatal(const char*t, ...) {
 	exit(0);
 }
 
-unsigned char* convert_image(int fd, int height, int width, size_t*sz){
+int image_start(int fd) {
 	MagickBooleanType stat;
 	FILE *fdesc = fdopen(fd, "rb");
 
 	stat = MagickReadImageFile(g_magick, fdesc);
-
 	if (stat == MagickFalse) {
 		return 0;
 	}
 
 	MagickResetIterator(g_magick);
 
-	plog3("Converting ...\n");
-	while (MagickNextImage(g_magick) != MagickFalse) {
-		MagickResizeImage(
-				g_magick,
-				height,
-				width,
-				LanczosFilter,
-				1.0);
-	}
+	MagickNextImage(g_magick);
 
+	return 1;
+}
+
+unsigned char* image_end(size_t *sz) {
 	return MagickGetImageBlob(g_magick, sz);
 }
 
 int image_offset(char*ptr){
 	return 1;
 }
-int image_quality() {
+
+int image_quality(char*ptr) {
+	int quality = atoi(ptr);
+
+	printf("[%d : %s]\n", quality, ptr);
+
 	return 1;
 }
-int image_resize(char*ptr, int*height, int*width) {
+int image_resize(char*ptr) {
 	char * last;
-	*height = -1;
-	*width = -1;
+
+	int height = -1, 
+	    width = -1;
+
 	for(last = ptr;;ptr++) {
 		if(ptr[0] >= '0' && ptr[0] <= '9') {
 			continue;
 		}
 		if(ptr[0] == 'x') {
 			ptr[0] = 0;
-			*height = atoi(last);
+			height = atoi(last);
 			ptr[0] = 'x';
 			last = ptr + 1;
 			continue;
 		}
 		if(ptr[0] <= 32) {
-			*width = atoi(last);
-			if(*height == -1) {
-				*height = *width;
+			width = atoi(last);
+			if(height == -1) {
+				height = width;
 			}
 			ptr++;
 			break;
 		}
 	}
+	MagickResizeImage(
+		g_magick,
+		height,
+		width,
+		LanczosFilter,
+		1.0);
 	return 1;
 }
 
@@ -283,19 +300,21 @@ static void show_image(struct mg_connection *conn,
 			// now null out the extension pointer from above
 			// we won't need it any more
 			ext[0] = 0;
+			image_start(fd);
 			for(pTmp = commandList; pTmp != pCommand; pTmp++) {
 				plog3("Command: [%s]\n", *pTmp);
+
 				switch(*pTmp[0]) {
 					case D_RESIZE:
-						image_resize(*(pTmp + 1), &height, &width);
+						image_resize(*pTmp + 1);
 						break;
 
 					case D_OFFSET:
-						image_offset(*(pTmp + 1));
+						image_offset(*pTmp + 1);
 						break;
 
 					case D_QUALITY:
-						image_quality();
+						image_quality(*pTmp + 1);
 						break;
 
 					default:
@@ -305,8 +324,8 @@ static void show_image(struct mg_connection *conn,
 
 				plog3("height: %d\nwidth: %d\n", height, width);
 
-				image = convert_image(fd, height, width, &sz);
 			}
+			image = image_end(&sz);
 			mg_printf(conn, "Content-Length: %d\r\n\r\n", sz);
 			mg_write(conn, image, sz);
 			MagickWriteImage(g_magick, fname);
@@ -432,6 +451,48 @@ char*itoa(int in) {
 	return ptr;
 }
 
+void main_loop(){
+#if !defined __linux__
+	#error KQUEUE needs to be written.  Exiting.
+#else
+	fd_set rfds;
+	int ret,
+	    i,
+	    len;
+
+	char buf[BUF_LEN];
+
+	g_notify = inotify_add_watch (g_notify_handle,
+		g_opts.img_root,
+	        IN_MODIFY | IN_CREATE | IN_DELETE);
+
+	for(;;) {
+		FD_ZERO (&rfds);
+		FD_SET (g_notify_handle, &rfds);
+		ret = select (g_notify_handle + 1, &rfds, NULL, NULL, NULL);
+		if (FD_ISSET (g_notify_handle, &rfds)) {
+			len = read(g_notify_handle, buf, BUF_LEN);
+			printf("%d\n", len);
+			while (i < len) {
+				struct inotify_event *event;
+
+				event = (struct inotify_event *) &buf[i];
+
+				printf ("wd=%d mask=%u cookie=%u len=%u\n",
+					event->wd, event->mask,
+					event->cookie, event->len);
+
+				if (event->len)
+					printf ("name=%s\n", event->name);
+
+				i += EVENT_SIZE + event->len;
+			}
+			printf("here");
+		}
+	}
+#endif
+}
+
 int main() {
 	struct mg_context *ctx;
 
@@ -441,6 +502,7 @@ int main() {
 		plog0("Unable to read the config");
 	}
 
+	g_notify_handle = NOTIFY_INIT;
        	ctx = mg_start();
 
 	MagickWandGenesis();
@@ -449,6 +511,6 @@ int main() {
 	mg_set_option(ctx, "ports", itoa(g_opts.port));
 	mg_set_uri_callback(ctx, "/*", &show_image, NULL);
 
-	getchar();
+	main_loop();
 	return 0;
 }
