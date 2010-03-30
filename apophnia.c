@@ -215,7 +215,7 @@ int image_offset(MagickWand *wand, char*ptr){
 
 	height = atoi_ptr(&ptr);
 	if(!ASSERT_CHAR(ptr, 'x')) {
-		printf("%s\n", ptr);
+		plog0("%s\n", ptr);
 		return 0;
 	}
 	width = atoi_ptr(&ptr);
@@ -223,16 +223,13 @@ int image_offset(MagickWand *wand, char*ptr){
 	offsetY = atoi_ptr(&ptr);
 	offsetX = atoi_ptr(&ptr);
 
-	plog0("[%d %d %d %d]", width, height, offsetX, offsetY);
 	return MagickCropImage(wand, width, height, offsetX, offsetY);
 }
 
 int image_quality(MagickWand *wand, char*ptr) {
 	int quality = atoi(ptr);
 
-	printf("[%d : %s]\n", quality, ptr);
-
-	return 1;
+	return MagickSetImageCompressionQuality(wand, quality);
 }
 
 int image_resize(MagickWand *wand, char*ptr) {
@@ -368,7 +365,7 @@ static void show_image(struct mg_connection *conn,
 			ext[0] = 0;
 			image_start(wand, fd);
 			for(pTmp = pCommand - 1; (pTmp + 1) != commandList; pTmp--) {
-				plog3("Command: [%s]\n", *pTmp);
+				plog3("Command: [%s]", *pTmp);
 
 				switch(*pTmp[0]) {
 					case D_RESIZE:
