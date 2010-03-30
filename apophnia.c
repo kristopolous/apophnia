@@ -30,7 +30,6 @@
 #define BUFSIZE	16384
 
 cJSON *g_config;
-MagickWand *g_magick;
 
 int g_notify_handle, 
     g_notify;
@@ -166,24 +165,25 @@ void fatal(const char*t, ...) {
 	exit(0);
 }
 
-int image_start(int fd) {
+int image_start(MagickWand *wand, int fd) {
 	MagickBooleanType stat;
 	FILE *fdesc = fdopen(fd, "rb");
 
-	stat = MagickReadImageFile(g_magick, fdesc);
+	stat = MagickReadImageFile(wand, fdesc);
 	if (stat == MagickFalse) {
 		return 0;
 	}
 
-	MagickResetIterator(g_magick);
+	MagickResetIterator(wand);
 
-	MagickNextImage(g_magick);
+	while (MagickNextImage(wand) != MagickFalse);
 
 	return 1;
 }
 
-unsigned char* image_end(size_t *sz) {
-	return MagickGetImageBlob(g_magick, sz);
+unsigned char* image_end(MagickWand *wand, size_t *sz) {
+
+	return MagickGetImageBlob(wand, sz);
 }
 
 #define ASSERT_CHAR(ptr, chr) ((ptr[0] == chr) && ptr++)
@@ -210,7 +210,7 @@ int atoi_ptr(char**ptr) {
 	return out * mult;
 }
 
-int image_offset(char*ptr){
+int image_offset(MagickWand *wand, char*ptr){
 	int offsetY, offsetX, height, width;
 
 	height = atoi_ptr(&ptr);
@@ -223,10 +223,11 @@ int image_offset(char*ptr){
 	offsetY = atoi_ptr(&ptr);
 	offsetX = atoi_ptr(&ptr);
 
-	return MagickChopImage(g_magick, width, height, offsetX, offsetY);
+	plog0("[%d %d %d %d]", width, height, offsetX, offsetY);
+	return MagickCropImage(wand, width, height, offsetX, offsetY);
 }
 
-int image_quality(char*ptr) {
+int image_quality(MagickWand *wand, char*ptr) {
 	int quality = atoi(ptr);
 
 	printf("[%d : %s]\n", quality, ptr);
@@ -234,7 +235,7 @@ int image_quality(char*ptr) {
 	return 1;
 }
 
-int image_resize(char*ptr) {
+int image_resize(MagickWand *wand, char*ptr) {
 	char * last;
 
 	int height = -1, 
@@ -261,7 +262,7 @@ int image_resize(char*ptr) {
 		}
 	}
 	MagickResizeImage(
-		g_magick,
+		wand,
 		height,
 		width,
 		LanczosFilter,
@@ -275,11 +276,9 @@ static void show_image(struct mg_connection *conn,
 
 	int ret,
 	    fd = -1; 
-	
-	int height, 
-	    width;
 
 	char fname[PATH_MAX],
+	     butcher[PATH_MAX],
 	     buf[BUFSIZE];
 
 	char *commandList[12], 
@@ -295,12 +294,15 @@ static void show_image(struct mg_connection *conn,
 	struct stat st;
 	size_t sz;
       	
+	MagickWand *wand = NewMagickWand();
 	
 	// first we try to just blindly open the requested file
 	ptr = request_info->uri + 1;
 	
 	strcpy(fname, ptr);
+	strcpy(butcher, ptr);
 
+	ptr = butcher;
 	do {
 		fd = open(ptr, O_RDONLY);
 		
@@ -317,7 +319,8 @@ static void show_image(struct mg_connection *conn,
 		for(; (last > ptr) && (*last != '.'); last--);
 		
 		if(last[0] == '.') {
-			ext = last;
+			last[0] = 0;
+			ext = last + 1;
 		} else {
 			break;
 		}
@@ -327,10 +330,12 @@ static void show_image(struct mg_connection *conn,
 			for(; (last > ptr) && (*last != '_'); last--);
 
 			if(last[0] == '_') {
-				*pCommand = last + 1;
+				last[0] = 0;
+				*pCommand = (last - ptr) + 1 + butcher;
 				pCommand++;
-				strcpy(fname + (last - ptr), ext);
-				plog3("Trying %s\n", fname);
+				fname[last-ptr] = '.';
+				strcpy(fname + (last - ptr + 1), ext);
+				plog3("Trying %s", fname);
 				fd = open(fname, O_RDONLY);
 				if(fd > 0) {
 					break;
@@ -361,21 +366,21 @@ static void show_image(struct mg_connection *conn,
 			// now null out the extension pointer from above
 			// we won't need it any more
 			ext[0] = 0;
-			image_start(fd);
-			for(pTmp = commandList; pTmp != pCommand; pTmp++) {
+			image_start(wand, fd);
+			for(pTmp = pCommand - 1; (pTmp + 1) != commandList; pTmp--) {
 				plog3("Command: [%s]\n", *pTmp);
 
 				switch(*pTmp[0]) {
 					case D_RESIZE:
-						image_resize(*pTmp + 1);
+						image_resize(wand, *pTmp + 1);
 						break;
 
 					case D_OFFSET:
-						image_offset(*pTmp + 1);
+						image_offset(wand, *pTmp + 1);
 						break;
 
 					case D_QUALITY:
-						image_quality(*pTmp + 1);
+						image_quality(wand, *pTmp + 1);
 						break;
 
 					default:
@@ -383,13 +388,11 @@ static void show_image(struct mg_connection *conn,
 						break;
 				}	
 
-				plog3("height: %d\nwidth: %d\n", height, width);
-
 			}
-			image = image_end(&sz);
+			image = image_end(wand, &sz);
 			mg_printf(conn, "Content-Length: %d\r\n\r\n", sz);
 			mg_write(conn, image, sz);
-			MagickWriteImage(g_magick, fname);
+			MagickWriteImage(wand, request_info->uri + 1);
 			MagickRelinquishMemory(image);
 		} else {
 			mg_printf(conn, "Content-Length: %d\r\n\r\n", st.st_size);
@@ -401,10 +404,12 @@ static void show_image(struct mg_connection *conn,
 				mg_write(conn, buf, ret);
 			}
 		}
+		close(fd);
 		
 	} else {
 		mg_printf(conn, "%s", "HTTP/1.1 404 NOT FOUND\r\n");
 	}
+	DestroyMagickWand(wand);
 }
 
 int read_config(){
@@ -533,7 +538,6 @@ void main_loop(){
 		ret = select (g_notify_handle + 1, &rfds, NULL, NULL, NULL);
 		if (FD_ISSET (g_notify_handle, &rfds)) {
 			len = read(g_notify_handle, buf, BUF_LEN);
-			printf("%d\n", len);
 			while (i < len) {
 				struct inotify_event *event;
 
@@ -548,7 +552,6 @@ void main_loop(){
 
 				i += EVENT_SIZE + event->len;
 			}
-			printf("here");
 		}
 	}
 #endif
@@ -567,7 +570,6 @@ int main() {
        	ctx = mg_start();
 
 	MagickWandGenesis();
-	g_magick = NewMagickWand();
 
 	mg_set_option(ctx, "ports", itoa(g_opts.port));
 	mg_set_uri_callback(ctx, "/*", &show_image, NULL);
