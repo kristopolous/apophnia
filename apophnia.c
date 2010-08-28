@@ -28,11 +28,14 @@
 
 #define CONFIG "apophnia.conf"
 #define BUFSIZE	16384
+#define MAX_FILE	1024
+#define MAX_DIRECTIVES 16
 
 cJSON *g_config;
 
 int g_notify_handle, 
-    g_notify;
+    g_notify,
+    g_stat_check = 0;
 
 struct {
 	char img_root[PATH_MAX],
@@ -165,27 +168,6 @@ void fatal(const char*t, ...) {
 	exit(0);
 }
 
-int image_start(MagickWand *wand, int fd) {
-	MagickBooleanType stat;
-	FILE *fdesc = fdopen(fd, "rb");
-
-	stat = MagickReadImageFile(wand, fdesc);
-	if (stat == MagickFalse) {
-		return 0;
-	}
-
-	MagickResetIterator(wand);
-
-	while (MagickNextImage(wand) != MagickFalse);
-
-	return 1;
-}
-
-unsigned char* image_end(MagickWand *wand, size_t *sz) {
-
-	return MagickGetImageBlob(wand, sz);
-}
-
 #define ASSERT_CHAR(ptr, chr) ((ptr[0] == chr) && ptr++)
 int atoi_ptr(char**ptr) {
 	char *local;
@@ -209,6 +191,117 @@ int atoi_ptr(char**ptr) {
 	*ptr = local;
 	return out * mult;
 }
+
+char*itoa(int in) {
+	static char ret[12],
+		    *ptr;
+
+       	memset(ret,0,12);
+	ptr = ret + 11;
+
+	while(in > 0) {
+		ptr--;
+		*ptr = (in % 10) + '0';
+		in /= 10;
+	}
+
+	return ptr;
+}
+
+char check_for_change(int fd, char*ptr) {
+	size_t sz,
+	       ext_len;
+
+	char *pFlat,
+	     *pFile,
+	     *end = ptr + strlen(ptr),
+	     *ext;
+
+	struct stat 	original,
+		   	converted,
+			test;
+
+	short ctr, f_sz = end - ptr;
+
+	pFlat = (char*)(malloc(f_sz * sizeof(char) * MAX_FILE * MAX_DIRECTIVES));
+
+	// find the extension
+	while(*end != '.' && end > ptr) { end --; }
+	ext = end;
+	ext_len = strlen(ext);
+	
+	fstat(fd, &converted);
+
+	for(ctr = 0; ctr < MAX_DIRECTIVES; ctr++) {
+		pFile = pFlat + (ctr * f_sz);
+
+		// truncate the directive
+		while(*end != '_' && end > ptr) { end --; }
+		if(end == ptr) {
+			break;
+		}
+		// copy up to this point in the name
+		sz = end - ptr;
+		memcpy(pFile, ptr, sz);
+		memcpy(pFile + sz, ext, ext_len);
+		pFile[sz + ext_len] = 0;
+
+		fflush(0);
+
+		if(stat(pFile, &test)) { 
+			break;
+		} else {
+			memcpy(&original, &test, sizeof(struct stat));
+		}
+
+		end --;
+	}
+
+	// we found the base, it's the stat of test
+	if(	test.st_mtime > converted.st_mtime || 
+		test.st_ctime > converted.st_ctime
+	) {
+		plog3("Found out of date files... removing");
+		
+		// invalidate the incoming image
+		unlink(ptr);
+		plog3(ptr);
+
+		// invalidate the chained images
+		for( ctr -= 2; ctr >= 0; ctr--) {
+			pFile = pFlat + (ctr * f_sz);
+			plog3(pFile);
+			unlink(pFile);
+		}
+		return (0);
+	}
+
+	free(pFlat);
+
+
+	return(1);
+}
+int image_start(MagickWand *wand, int fd) {
+	MagickBooleanType stat;
+	FILE *fdesc = fdopen(fd, "rb");
+
+	stat = MagickReadImageFile(wand, fdesc);
+	if (stat == MagickFalse) {
+		return 0;
+	}
+
+	MagickResetIterator(wand);
+
+	while (MagickNextImage(wand) != MagickFalse);
+
+	return 1;
+}
+
+unsigned char* image_end(MagickWand *wand, size_t *sz) {
+
+	return MagickGetImageBlob(wand, sz);
+}
+
 
 int image_offset(MagickWand *wand, char*ptr){
 	int offsetY, offsetX, height, width;
@@ -303,7 +396,25 @@ static void show_image(struct mg_connection *conn,
 	do {
 		fd = open(ptr, O_RDONLY);
 		
+		// If the source image changes, then we have to change the converted images
+		// But because we don't want a bunch of inotifies and we want to make this
+		// rather kernel-neutral, we just do an occational stat on the base file
+		// to see if it has a different mtime or ctime.
+		//
+		// Even though this isn't atomically incremented, it doesn't matter.   
+		// The point is that we wish to do *occasional* checks just so we aren't
+		// way out of sync.
+		g_stat_check++;
+
 		if(fd > 0) {
+			if (! (g_stat_check & 0x7F)) {
+				// get the stat of the open file handle
+				if(check_for_change(fd, ptr)) {
+					close(fd);
+				} else {
+					break;
+				}
+			}
 			break;
 		}
 
@@ -328,12 +439,16 @@ static void show_image(struct mg_connection *conn,
 
 			if(last[0] == '_') {
 				last[0] = 0;
+
+				// add this as a command
 				*pCommand = (last - ptr) + 1 + butcher;
 				pCommand++;
 				fname[last-ptr] = '.';
+
 				strcpy(fname + (last - ptr + 1), ext);
 				plog3("Trying %s", fname);
 				fd = open(fname, O_RDONLY);
+
 				if(fd > 0) {
 					break;
 				}
@@ -496,22 +611,6 @@ int read_config(){
 	}
 
 	return 1;
-}
-
-char*itoa(int in) {
-	static char ret[12],
-		    *ptr;
-
-       	memset(ret,0,12);
-	ptr = ret + 11;
-
-	while(in > 0) {
-		ptr--;
-		*ptr = (in % 10) + '0';
-		in /= 10;
-	}
-
-	return ptr;
 }
 
 void main_loop(){
