@@ -8,4 +8,4 @@ package:
 clean:
 	rm -rf *.o */*.o apophnia *~ */*.so */*.a
 install:
-	install image /usr/local/bin/
+	install apophnia /usr/local/bin/
