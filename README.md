@@ -30,15 +30,15 @@ Apophnia is a dedicated image server.  Designed to solve all of the common image
 
 ### Supported Directives
 
-* RESIZE @r[HEIGHT(xWIDTH)]@
- _example_ @myfile_r1000x800.jpg@ @myfile_r400.jpg@ (creates a 400x400)
-* OFFSET @o[HEIGHTxWIDTH [ [p|m] VERTICAL ( [p|m] HORIZONTAL) ]@
+* RESIZE `r[HEIGHT(xWIDTH)]`
+ _example_ `myfile_r1000x800.jpg` `myfile_r400.jpg` (creates a 400x400)
+* OFFSET `o[HEIGHTxWIDTH [ [p|m] VERTICAL ( [p|m] HORIZONTAL) ]`
  *Note the syntax is "p" and "m", not "+" and "-" because of HTML escape sequences*
- _example_ @myfile_o100x100p100p50.jpg@ @myfile_o400x400m10m40.jpg@.  It mattes white.
-* QUALITY @qINTERGER@ (0 lowest, 99 highest)
- _example_  @myfile_q60.png@ @myfile_q54.jpg@
-* NOP @_@
- _example_ @myfile________q60.png@ @myfile__q54.jpg@
+ _example_ `myfile_o100x100p100p50.jpg` `myfile_o400x400m10m40.jpg`.  It mattes white.
+* QUALITY `qINTERGER` (0 lowest, 99 highest)
+ _example_  `myfile_q60.png` `myfile_q54.jpg`
+* NOP `_`
+ _example_ `myfile________q60.png` `myfile__q54.jpg`
 * FORMAT if *x* is specified and doesn't exist, then seek out other images in the order of *y*
  * GIF: png, bmp, jpg, jpeg, *fail*
  * JPG: jpeg, png, bmp, gif, tga, tiff, *fail*
@@ -54,7 +54,7 @@ BMP Note: DIB v.5 (Win98/2K+) "supports BMP being a container format for both PN
 h4. Chaining
 
 Directives can of course be chained.  If you have a file, say, a 2000x2000 file, myfile.bmp then you can do
-@myfile_r1000x1000_o250x250p250p250_q50.png@
+`myfile_r1000x1000_o250x250p250p250_q50.png`
 Here's the steps:
 
   * myfile_r1000x1000_o250x250p250p250_q50.png is sought out, fails. _quality 50_ is pushed on the stack. IOCount = 1
@@ -69,7 +69,7 @@ Here's the steps:
   * It is served to the client and asynchronously written to disk at myfile_r1000x1000_o250x250p250p250_q50.png IOCount = 7
 
 As you can see, the first time the image is served, it is quite expensive.  But now another client will request the same image:
-@GET /myfile_r1000x1000_o250x250p250p250_q50.png  HTTP/1.1@
+`GET /myfile_r1000x1000_o250x250p250p250_q50.png  HTTP/1.1`
 
  * myfile_r1000x1000_o250x250p250p250_q50.png is sought out, found.  Served to client.
 
@@ -80,27 +80,27 @@ Much better the second time around, eh?
 The config file is called apophnia.conf and is in "JSON":http://www.json.org/ format. 
 
 ### Supported Options
-* @"port": INTEGER@ - default: 2345
+* `"port": INTEGER` - default: 2345
   The port to run apophnia on.
-* @"img_root": STRING@ - default: "./"
+* `"img_root": STRING` - default: "./"
   The root directory of images to serve
-* @"proportion": ["squash", "crop", "matte", "seamcarve"]@ - default: squash. If a 200x1000 image is requested at 200x200, then you can either
+* `"proportion": ["squash", "crop", "matte", "seamcarve"]` - default: squash. If a 200x1000 image is requested at 200x200, then you can either
  * squash: Squash the image disproportionally
  * crop: Center the content and crop the excess pixels
  * matte: Take the 200x1000 image, resize it to 40x200, center it, and matte it on a 200x200 white background
  * seamcarve: See the "wikipedia article":http://en.wikipedia.org/wiki/Seam_carving
-* @"true_bmp:" INTEGER (0/1)@ - default: 0
+* `"true_bmp:" INTEGER (0/1)` - default: 0
   Whether to serve a true, uncompressed bmp, or to encapsulate it in a DIB png
-* @"log_level": [0 ... 3]@ - default: 0
+* `"log_level": [0 ... 3]` - default: 0
 
  * 0 - log only crashing conditions.
  * 1 - log file creations and updates
  * 2 - log all requests
  * 3 - log as if it's not a performance hit
 
-* @"log_file": STRING@ - default: /dev/stdout
+* `"log_file": STRING` - default: /dev/stdout
   Where the log files go...
 
 ### Proposed Options
-* @"no_support": Array("DIRECTIVE1", "DIRECTIVE2")@ - default: empty/everything supported
-  Example:  To disable the quality and resizing directives, you can use @"no_support": ["resize", "quality"]@ 
+* `"no_support": Array("DIRECTIVE1", "DIRECTIVE2")` - default: empty/everything supported
+  Example:  To disable the quality and resizing directives, you can use `"no_support": ["resize", "quality"]` 
