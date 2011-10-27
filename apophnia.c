@@ -31,6 +31,8 @@
 #include <stdlib.h>
 #include <stdarg.h>
 
+#include <sys/time.h>
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -43,7 +45,7 @@
   #include <linux/limits.h>
   #include <linux/types.h>
   #define NOTIFY_INIT  inotify_init()
-  #define EVENT_SIZE  (sizeof (struct inotify_event))
+  #define EVENT_SIZE   (sizeof (struct inotify_event))
   #define BUF_LEN      (1024 * (EVENT_SIZE + 16))
 #elif defined __OpenBSD__ || __FreeBSD__ || __NetBSD__ || __APPLE__ 
   #include <sys/event.h>
@@ -69,6 +71,7 @@ int
 struct {
   char 
     img_root[PATH_MAX],
+    badfile_fd[PATH_MAX],
     propotion,
     true_bmp;
 
@@ -96,6 +99,7 @@ struct {
   { "no_support", "Proportion", &g_opts.img_root, cJSON_String },
   { "log_level", "Log Level", &g_opts.log_level, cJSON_Number },
   { "log_file", "Log File", &g_opts.log_fd, cJSON_String },
+  { "404", "404 image", &g_opts.badfile_fd, cJSON_String },
   { 0, 0, 0, 0 }
 };
 
@@ -116,8 +120,9 @@ const char *proportion[] = {
 #define D_QUALITY  'q'
 
 struct {
-  char pfix;
-  char *name;
+  char 
+    pfix,
+    *name;
 } directives[] = {
   { D_RESIZE, "Resize" },
   { D_OFFSET, "Offset" },
@@ -147,7 +152,11 @@ void (*plog3)(const char*t, ...);
 void log_real(const char*t, ...) {
   va_list ap;
   char *s;
+  struct timeval tp;
   va_start(ap, t);
+
+  gettimeofday(&tp, 0);
+  printf("[ %d.%06d ] ", (int) tp.tv_sec, (int) tp.tv_usec );
 
   while(*t) {
     if(*t == '%') {
@@ -246,6 +255,48 @@ char *itoa(int in) {
   }
 
   return ptr;
+}
+
+void *do404(struct mg_connection *conn) {
+  static char *buffer = 0;
+  static int len = 0;
+
+  if(!buffer && g_opts.badfile_fd) {
+    int fd = 0, ret;
+    struct stat st;
+    char *ptr;
+
+    fd = open(g_opts.badfile_fd, O_RDONLY);
+    if(fd > 0) {
+      fstat(fd, &st);
+      len = st.st_size;
+      buffer = (char*)malloc(sizeof(char) * len);
+      ptr = buffer;
+
+      for(;;) {  
+        ret = read(fd, ptr, BUFSIZE);
+
+        if(!ret) {
+          break;
+        }
+
+        ptr += ret;
+      }
+    }
+  }
+
+  mg_printf(conn, "%s", "HTTP/1.1 404 Not Found\n");
+  mg_printf(conn, "%s", "Content-Type: image/png\n");
+  if(len) {
+    mg_printf(conn, "Content-Length: %d\n", len);
+  }
+  mg_printf(conn, "%s", "Connection: Close\r\n\r\n");
+
+  if(len) {
+    mg_write(conn, buffer, len);
+  }
+
+  return (void*)1;
 }
 
 char check_for_change(int fd, char*ptr) {
@@ -413,13 +464,6 @@ int image_resize(MagickWand *wand, char*ptr) {
   return 1;
 }
 
-void *do404(struct mg_connection *conn) {
-  mg_printf(conn, "%s", "HTTP/1.1 404 Not Found\r\n");
-  mg_printf(conn, "%s", "Content-Type: text/plain\r\n");
-  mg_printf(conn, "%s", "Connection: Close\r\n");
-  return (void*)1;
-}
-
 void *show_image(
     enum mg_event event,
     struct mg_connection *conn,
@@ -447,6 +491,11 @@ void *show_image(
 
   struct stat st;
   size_t sz;
+
+  if(event == MG_EVENT_LOG) {
+    plog0("%s", request_info->log_message);
+    return (void*)0;
+  }
         
   MagickWand *wand = NewMagickWand();
   
@@ -571,11 +620,14 @@ void *show_image(
       MagickRelinquishMemory(image);
     } else {
       mg_printf(conn, "Content-Length: %d\r\n\r\n", st.st_size);
+
       for(;;) {  
         ret = read(fd, buf, BUFSIZE);
+
         if(!ret) {
           break;
         }
+
         mg_write(conn, buf, ret);
       }
     }
@@ -604,6 +656,8 @@ int read_config(){
     fd = -1;
 
   struct stat st;
+
+  memset((void*)&g_opts, 0, sizeof(g_opts));
         
   fd = open(CONFIG, O_RDONLY);
   if(fd == -1) {
@@ -690,7 +744,7 @@ void main_loop(){
 
   int 
     ret,
-    i,
+    i = 0,
     len;
 
   char buf[BUF_LEN];
@@ -714,12 +768,13 @@ void main_loop(){
 
         event = (struct inotify_event *) &buf[i];
 
-        printf ("wd=%d mask=%u cookie=%u len=%u\n",
+        plog3("wd=%d mask=%u cookie=%u len=%u",
           event->wd, event->mask,
           event->cookie, event->len);
 
-        if (event->len)
-          printf ("name=%s\n", event->name);
+        if (event->len) {
+          plog3("name=%s", event->name);
+        }
 
         i += EVENT_SIZE + event->len;
       }

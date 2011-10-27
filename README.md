@@ -101,6 +101,9 @@ The config file is called apophnia.conf and is in "JSON":http://www.json.org/ fo
 * `"log_file": STRING` - default: /dev/stdout
   Where the log files go...
 
+* `"404": STRING` - default: empty
+  The image to serve (if any) when no image is found.
+
 ### Proposed Options
 * `"no_support": Array("DIRECTIVE1", "DIRECTIVE2")` - default: empty/everything supported
   Example:  To disable the quality and resizing directives, you can use `"no_support": ["resize", "quality"]` 
