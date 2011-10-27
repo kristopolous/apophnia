@@ -282,6 +282,7 @@ void *do404(struct mg_connection *conn) {
 
         ptr += ret;
       }
+      close(fd);
     }
   }
 
