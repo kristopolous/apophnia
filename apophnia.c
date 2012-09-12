@@ -1,7 +1,7 @@
 /*
  * Apophnia - An image server - https://github.com/kristopolous/apophnia
  * 
- * Copyright (c) 2011, Chris McKenzie
+ * Copyright (c) 2010-2012 Chris McKenzie
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without modification, 
@@ -73,6 +73,7 @@ struct {
     img_root[PATH_MAX],
     badfile_fd[PATH_MAX],
     propotion,
+    b_disk,
     true_bmp;
 
   int 
@@ -100,6 +101,7 @@ struct {
   { "no_support", "Proportion", &g_opts.img_root, cJSON_String },
   { "log_level", "Log Level", &g_opts.log_level, cJSON_Number },
   { "log_file", "Log File", &g_opts.log_fd, cJSON_String },
+  { "disk", "Disk Write", &g_opts.b_disk, cJSON_Number },
   { "404", "404 image", &g_opts.badfile_fd, cJSON_String },
   { "max_age", "Cache Max-Age", &g_opts.max_age, cJSON_Number },
   { 0, 0, 0, 0 }
@@ -374,6 +376,7 @@ char check_for_change(int fd, char*ptr) {
       unlink(pFile);
     }
 
+    free(pFlat);
     return 0;
   }
 
@@ -589,6 +592,7 @@ void *show_image(
     mg_printf(conn, "%s", "HTTP/1.1 200 OK\r\n");
     mg_printf(conn, "%s", "Content-Type: image/jpeg\r\n");
     mg_printf(conn, "%s", "Connection: Keep-Alive\r\n");
+
     // add cache control headers
     now = time( (time_t*) 0 );
      (void) strftime( nowbuf, sizeof(nowbuf), rfc1123fmt, gmtime( &now ) );
@@ -637,7 +641,12 @@ void *show_image(
       image = image_end(wand, &sz);
       mg_printf(conn, "Content-Length: %d\r\n\r\n", sz);
       mg_write(conn, image, sz);
-      MagickWriteImage(wand, request_info->uri + 1);
+
+      // Only save the file unless disk is set to false.
+      if (g_opts.b_disk) {
+        MagickWriteImage(wand, request_info->uri + 1);
+      }
+
       MagickRelinquishMemory(image);
     } else {
       mg_printf(conn, "Content-Length: %d\r\n\r\n", st.st_size);
@@ -699,6 +708,7 @@ int read_config(){
 
   g_opts.port = 2345;
   g_opts.log_level = 0;
+  g_opts.b_disk = 1;
 
   strcpy(g_opts.img_root, "./");
 
