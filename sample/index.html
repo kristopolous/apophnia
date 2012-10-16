@@ -1,0 +1,33 @@
+<!doctype html>
+<head>
+<style>
+  body{
+    line-height:0;
+    white-space:nowrap
+  }
+</style>
+</head>
+<body onload=generate()></body>
+<script>
+  var
+    x = 0,
+    y = 0,
+    size = 90,
+    cnt = 0;  
+
+  function generate() {
+    for(y = 0; y < 1920; y += size) {
+      for(x = 0; x < 1280; x += size) {
+        var img = document.createElement('img');
+
+        img.style.width = size;
+        img.style.height = size;
+        img.src = "http://localhost:1210/example_o" + size + "x" + size + "p" + y + "p" + x + ".jpg";
+
+        document.body.appendChild(img);
+        cnt++;
+      }
+      document.body.innerHTML += "<br>";
+    }
+  }
+</script>

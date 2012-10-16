@@ -31,6 +31,9 @@
 #include <stdlib.h>
 #include <stdarg.h>
 
+#include <setjmp.h>
+#include <signal.h>
+
 #include <sys/time.h>
 
 #include <sys/types.h>
@@ -63,6 +66,8 @@
 
 cJSON *g_config;
 
+jmp_buf g_jump_buf;
+
 int 
   g_notify_handle, 
   g_notify,
@@ -72,7 +77,7 @@ struct {
   char 
     img_root[PATH_MAX],
     badfile_fd[PATH_MAX],
-    propotion,
+    proportion,
     b_disk,
     true_bmp;
 
@@ -96,7 +101,7 @@ struct {
 } args[] = {
   { "port", "Mongoose Port", &g_opts.port, cJSON_Number },
   { "img_root", "Image Root", &g_opts.img_root, cJSON_String },
-  { "propotion", "Proportion", &g_opts.propotion, cJSON_String },
+  { "proportion", "Proportion", &g_opts.proportion, cJSON_String },
   { "true_bmp", "True BMP", &g_opts.true_bmp, cJSON_Number },
   { "no_support", "Proportion", &g_opts.img_root, cJSON_String },
   { "log_level", "Log Level", &g_opts.log_level, cJSON_Number },
@@ -459,6 +464,11 @@ int image_resize(MagickWand *wand, char*ptr) {
     }
   }
 
+  printf("%d\n", g_opts.proportion);
+  /*
+  if(g_opts.proportion ==
+  MagickLiquidRescaleImage
+  */
   MagickResizeImage(
     wand,
     height,
@@ -480,7 +490,11 @@ void *show_image(
     ret,
     fd = -1; 
 
+  int formatOffset = 0;
+
   char 
+    // index in the formatCheck for the fallback
+    formatIndex = -1,
     fname[PATH_MAX],
     butcher[PATH_MAX],
     buf[BUFSIZE],
@@ -567,7 +581,7 @@ void *show_image(
         // add this as a command
         *pCommand = (last - ptr) + 1 + butcher;
         pCommand++;
-        fname[last-ptr] = '.';
+        fname[last - ptr] = '.';
 
         strcpy(fname + (last - ptr + 1), ext);
         plog3("Trying %s", fname);
@@ -575,6 +589,33 @@ void *show_image(
 
         if(fd > 0) {
           break;
+        }
+
+        // FALLBACKS
+        // Find the index in the check if any.
+        for(formatIndex = 0; formatCheck[formatIndex].extension; formatIndex++) {
+          if (!strcmp(ext, formatCheck[formatIndex].extension)) {
+            break;
+          }
+        }
+
+        if (!formatCheck[formatIndex].extension) {
+          break;
+        }
+
+        for(
+          formatOffset = 0;
+          formatCheck[formatIndex].fallbacks[formatOffset];
+          formatOffset++
+        ) {
+          ext = formatCheck[formatIndex].fallbacks[formatOffset];
+          strcpy(fname + (last - ptr + 1), ext);
+          plog3("Trying %s", fname);
+          fd = open(fname, O_RDONLY);
+
+          if(fd > 0) {
+            break;
+          }
         }
       } else {
         // we must give up eventually
@@ -614,7 +655,7 @@ void *show_image(
 
       // now null out the extension pointer from above
       // we won't need it any more
-      ext[0] = 0;
+      //ext[0] = 0;
       image_start(wand, fd);
       for(pTmp = pCommand - 1; (pTmp + 1) != commandList; pTmp--) {
         plog3("Command: [%s]", *pTmp);
@@ -694,6 +735,8 @@ int read_config(){
     fatal("Couldn't open %s", CONFIG);
   }
 
+  plog0("Reading %s", CONFIG);
+
   if(fstat(fd, &st)) {
     fatal("fstat failure");
   }
@@ -749,12 +792,9 @@ int read_config(){
 
   // set up the logs
   switch(g_opts.log_level) {
-    case 3:
-      plog3 = log_real;
-    case 2:
-      plog2 = log_real;
-    case 1:
-      plog1 = log_real;
+    case 3: plog3 = log_real;
+    case 2: plog2 = log_real;
+    case 1: plog1 = log_real;
   }
 
   munmap(start, st.st_size);
@@ -786,6 +826,8 @@ void main_loop(){
   );
 
   for(;;) {
+    setjmp(g_jump_buf);
+
     FD_ZERO (&rfds);
     FD_SET (g_notify_handle, &rfds);
     ret = select (g_notify_handle + 1, &rfds, NULL, NULL, NULL);
@@ -814,8 +856,14 @@ void main_loop(){
 #endif
 }
 
+void sighandle(int which) {
+  longjmp(g_jump_buf, 1);
+}
+
 int main() {
   struct mg_context *ctx;
+
+  signal(SIGPIPE, sighandle);
 
   plog0 = log_real;
   plog0("Starting Apophnia...");

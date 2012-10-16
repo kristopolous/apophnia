@@ -1,5 +1,5 @@
-CFLAGS= `pkg-config --cflags Wand` -O3
-LDFLAGS= `pkg-config --libs Wand` -lpthread -lm -ldl -s
+CFLAGS=`pkg-config --cflags Wand` -g3
+LDLIBS=`pkg-config --libs Wand` -lpthread -lm -ldl 
 apophnia: apophnia.o mongoose/mongoose.o cjson/cJSON.o 
 
 package:
