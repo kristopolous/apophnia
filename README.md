@@ -2,6 +2,8 @@
 
 Apophnia is a dedicated image server.  Designed to solve all of the common image serving problems that are a pain to deal with for anyone that has a large web presence.
 
+**This does not serve HTML, CSS, JAVASCRIPT, or any other kind of document. It just serves images.**
+
 # Image Serving Problems
 
   * Various sizes of images are needed for various purposes.
