@@ -5,25 +5,18 @@
     margin:0;
   }
 
-  a{
-    color:#fff;
-  }
-
   #image-container{
+    line-height:0;
     white-space: nowrap;
+    text-align:center;
+    margin-top:2em;
   }
 
-  #image-container span{
-    display:inline-block;
-    white-space:normal;
-    color:#fff;
-    font-size:0.75em;
-  }
-
-  img{
+  #image-container a{
     display:inline-block;
   }
 
+  img{margin:-1px;border:1px solid white}
   #results{
     font:18px/30px Verdana;
     display:block;
@@ -50,25 +43,26 @@
     x = 0,
     y = 0,
     loadTime = [],
+    total = 0,
     epoch = new Date(),
     errorCount = 0,
-    size = 128,
+    size = 64,
     cnt = 0;  
 
   function $(dom) {
     return document.getElementById(dom);
   }
-  loadTime.total = 0;
-  loadTime.max = 0;
-  loadTime.min = 1e20;
+  total = 0;
 
   function do_status() {
+
     $("results").innerHTML = "<span>" + [
-      "Average: " + loadTime.total / loadTime.length, 
-      "Max: " + loadTime.max,
-      "Min: " + loadTime.min,
-      "Total: " + cnt,
-      "Loaded: " + loadTime.length,
+      "Min: " + loadTime[0],
+      "25th perc: " + loadTime[Math.floor(loadTime.length / 4)],
+      "Average: " + Math.floor(total / loadTime.length), 
+      "75th perc: " + loadTime[3 * Math.floor(loadTime.length / 4)],
+      "Max: " + loadTime[loadTime.length - 1],
+      "Loaded: " + loadTime.length + " / " + cnt,
       "Errors: " + errorCount
     ].join("</span><span>") + "</span>";
   }
@@ -79,36 +73,28 @@
     for(y = 0; y < 768; y += size) {
       for(x = 0; x < 1024; x += size) {
         var img = document.createElement('img');
-        var span = document.createElement("span");
+        var a = document.createElement("a");
 
         img.onload = function(){ 
           var delta = (+(new Date()) - epoch); 
           loadTime.push(delta);
-          loadTime.total += delta;
-          loadTime.max = loadTime.max < delta ? delta : loadTime.max;
-          loadTime.min = loadTime.min > delta ? delta : loadTime.min;
+          total += delta;
+          loadTime = loadTime.sort();
  
           do_status();
-
-          this.parentNode.style.background = 'url(' + this.src + ')';
-          this.parentNode.innerHTML = [
-            "<a target=_blank href=" + this.src + ">",
-            this.src.split('.').join(' .'),
-            "</a>"
-          ].join("");
-          
-          this.parentNode.removeChild(this);
         }
         img.onerror = function(){ 
           errorCount++; 
           do_status();
         }
-        span.style.width = size + "px";
-        span.style.height = size + "px";
-        span.appendChild(img);
+        a.style.width = size + "px";
+        a.style.height = size + "px";
+        a.appendChild(img);
 
-        img.src = "http://localhost:1210/example_o" + size + "x" + size + "p" + y + "p" + x + ".jpg?" + Math.random();
-        imageContainer.appendChild(span);
+        // img.src = a.href = "example_o" + size + "x" + size + "p" + y + "p" + x + ".jpg?" + Math.random();
+        img.src = a.href = "http://localhost:1210/example_o" + size + "x" + size + "p" + y + "p" + x + ".jpg?" + Math.random();
+
+        imageContainer.appendChild(a);
         cnt++;
       }
       imageContainer.appendChild(document.createElement("br"));
