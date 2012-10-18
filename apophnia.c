@@ -128,7 +128,7 @@ const char *proportion[] = {
 #define D_OFFSET  'o'
 #define D_QUALITY  'q'
 
-struct {
+const struct {
   char 
     pfix,
     *name;
@@ -139,7 +139,7 @@ struct {
   { 0, 0 }
 };
 
-struct {
+const struct {
   char 
     *extension,
     *fallbacks[8];
@@ -165,7 +165,7 @@ void log_real(const char*t, ...) {
   va_start(ap, t);
 
   gettimeofday(&tp, 0);
-  printf("[ %d.%06d ] ", (int) tp.tv_sec, (int) tp.tv_usec );
+  printf("[ %d: %d.%06d ] ", (int) getpid(), (int) tp.tv_sec, (int) tp.tv_usec );
 
   while(*t) {
     if(*t == '%') {
@@ -254,7 +254,7 @@ char *itoa(int in) {
     ret[12],
     *ptr;
 
-  memset(ret,0,12);
+  memset(ret, 0, 12);
   ptr = ret + 11;
 
   while(in > 0) {
@@ -482,14 +482,14 @@ int image_resize(MagickWand *wand, char*ptr) {
 
 void *show_image(
     enum mg_event event,
-    struct mg_connection *conn,
-    const struct mg_request_info *request_info
+    struct mg_connection *conn
   ) {
 
   int 
     ret,
     fd = -1; 
 
+  const struct mg_request_info *request_info = mg_get_request_info(conn);
   int formatOffset = 0;
 
   char 
@@ -518,7 +518,7 @@ void *show_image(
   char expbuf[100];
 
   if(event == MG_EVENT_LOG) {
-    plog0("%s", request_info->log_message);
+    plog0("%s", mg_get_log_message(conn));
     return (void*)0;
   }
         
@@ -690,7 +690,7 @@ void *show_image(
 
       MagickRelinquishMemory(image);
     } else {
-      mg_printf(conn, "Content-Length: %d\r\n\r\n", st.st_size);
+      mg_printf(conn, "Content-Length: %d\r\n\r\n", (int) st.st_size);
 
       for(;;) {  
         ret = read(fd, buf, BUFSIZE);
@@ -709,6 +709,7 @@ void *show_image(
   }
 
   DestroyMagickWand(wand);
+
 
   return 0;
 }
@@ -825,6 +826,8 @@ void main_loop(){
     IN_MODIFY | IN_CREATE | IN_DELETE
   );
 
+  MagickWandGenesis();
+
   for(;;) {
     setjmp(g_jump_buf);
 
@@ -874,8 +877,6 @@ int main() {
 
   g_notify_handle = NOTIFY_INIT;
 
-  MagickWandGenesis();
-
   {
     const char *options[] = {
       "listening_ports", itoa(g_opts.port),
@@ -884,6 +885,10 @@ int main() {
 
     plog3("Listening on port %d", g_opts.port);
     ctx = mg_start(&show_image, NULL, options);
+    if (!ctx) {
+      plog0("Errors encountered. Exiting...");
+      return 0;
+    }
   }
 
   main_loop();

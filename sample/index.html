@@ -2,32 +2,117 @@
 <head>
 <style>
   body{
-    line-height:0;
-    white-space:nowrap
+    margin:0;
+  }
+
+  a{
+    color:#fff;
+  }
+
+  #image-container{
+    white-space: nowrap;
+  }
+
+  #image-container span{
+    display:inline-block;
+    white-space:normal;
+    color:#fff;
+    font-size:0.75em;
+  }
+
+  img{
+    display:inline-block;
+  }
+
+  #results{
+    font:18px/30px Verdana;
+    display:block;
+    color:#eee;
+    padding:0.75em 1.5em;
+    background:#101;
+  }
+
+  #results span{
+    display:inline-block;
+    width:30%
   }
 </style>
 </head>
-<body onload=generate()></body>
+<body>
+  <div id=results>
+    <span id=error-count></span>
+    <span id=load-time></span>
+  </div>
+  <div id=image-container></div>
+</body>
 <script>
   var
     x = 0,
     y = 0,
-    size = 90,
+    loadTime = [],
+    epoch = new Date(),
+    errorCount = 0,
+    size = 128,
     cnt = 0;  
 
+  function $(dom) {
+    return document.getElementById(dom);
+  }
+  loadTime.total = 0;
+  loadTime.max = 0;
+  loadTime.min = 1e20;
+
+  function do_status() {
+    $("results").innerHTML = "<span>" + [
+      "Average: " + loadTime.total / loadTime.length, 
+      "Max: " + loadTime.max,
+      "Min: " + loadTime.min,
+      "Total: " + cnt,
+      "Loaded: " + loadTime.length,
+      "Errors: " + errorCount
+    ].join("</span><span>") + "</span>";
+  }
+
   function generate() {
-    for(y = 0; y < 1920; y += size) {
-      for(x = 0; x < 1280; x += size) {
+    var imageContainer = $("image-container");
+
+    for(y = 0; y < 768; y += size) {
+      for(x = 0; x < 1024; x += size) {
         var img = document.createElement('img');
+        var span = document.createElement("span");
 
-        img.style.width = size;
-        img.style.height = size;
-        img.src = "http://localhost:1210/example_o" + size + "x" + size + "p" + y + "p" + x + ".jpg";
+        img.onload = function(){ 
+          var delta = (+(new Date()) - epoch); 
+          loadTime.push(delta);
+          loadTime.total += delta;
+          loadTime.max = loadTime.max < delta ? delta : loadTime.max;
+          loadTime.min = loadTime.min > delta ? delta : loadTime.min;
+ 
+          do_status();
 
-        document.body.appendChild(img);
+          this.parentNode.style.background = 'url(' + this.src + ')';
+          this.parentNode.innerHTML = [
+            "<a target=_blank href=" + this.src + ">",
+            this.src.split('.').join(' .'),
+            "</a>"
+          ].join("");
+          
+          this.parentNode.removeChild(this);
+        }
+        img.onerror = function(){ 
+          errorCount++; 
+          do_status();
+        }
+        span.style.width = size + "px";
+        span.style.height = size + "px";
+        span.appendChild(img);
+
+        img.src = "http://localhost:1210/example_o" + size + "x" + size + "p" + y + "p" + x + ".jpg?" + Math.random();
+        imageContainer.appendChild(span);
         cnt++;
       }
-      document.body.innerHTML += "<br>";
+      imageContainer.appendChild(document.createElement("br"));
     }
   }
+  window.onload = generate;
 </script>
