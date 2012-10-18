@@ -7,16 +7,19 @@
 
   #image-container{
     line-height:0;
+    display:inline-block;
     white-space: nowrap;
     text-align:center;
-    margin-top:2em;
+    margin-top:3em;
+    background:#babcc4;
+    padding:1.5em;
   }
 
   #image-container a{
     display:inline-block;
   }
 
-  img{margin:-1px;border:1px solid white}
+  img{margin:-1px;border:1px solid #342;background:#fff;display:inline-block}
   #results{
     font:18px/30px Verdana;
     display:block;
@@ -29,14 +32,45 @@
     display:inline-block;
     width:30%
   }
+  #width{
+    background:#000;
+    padding-left:1em;
+    border-bottom:1px solid #446;
+  }
+  #width a {
+    font-family: Verdana;
+    letter-spacing: 0.10em;
+    display:inline-block;
+    text-decoration: none;
+    margin: 0.75em;
+    padding: 0.25em 2em;
+    color: #ddd;
+    border: 1px solid #667;
+    background:#113;
+  }
+  #width a:hover {
+    background:#336;
+    color:#fff;
+  }
+  #width a.selected {
+    color:#fff;
+    background:#449;
+  }
 </style>
 </head>
 <body>
   <div id=results>
-    <span id=error-count></span>
-    <span id=load-time></span>
   </div>
+  <div id=width>
+    <a href=?16>16x16</a>
+    <a href=?32>32x32</a>
+    <a href=?64>64x64</a>
+    <a href=?128>128x128</a>
+    <a href=?256>256x256</a>
+  </div>
+  <centeR>
   <div id=image-container></div>
+</center>
 </body>
 <script>
   var
@@ -57,17 +91,26 @@
   function do_status() {
 
     $("results").innerHTML = "<span>" + [
-      "Min: " + loadTime[0],
-      "25th perc: " + loadTime[Math.floor(loadTime.length / 4)],
-      "Average: " + Math.floor(total / loadTime.length), 
-      "75th perc: " + loadTime[3 * Math.floor(loadTime.length / 4)],
-      "Max: " + loadTime[loadTime.length - 1],
-      "Loaded: " + loadTime.length + " / " + cnt,
-      "Errors: " + errorCount
+      "Min: " + (loadTime[0] / 1000).toFixed(3),
+      "25th perc: " + (loadTime[Math.floor(loadTime.length / 4)] / 1000).toFixed(3),
+      "Average: " + (Math.floor(total / loadTime.length) / 1000).toFixed(3), 
+      "75th perc: " + (loadTime[3 * Math.floor(loadTime.length / 4)] / 1000).toFixed(3),
+      "Max: " + (loadTime[loadTime.length - 1] / 1000).toFixed(3),
+      "Loaded: " + loadTime.length + " / " + cnt
     ].join("</span><span>") + "</span>";
   }
 
   function generate() {
+    if(window.location.search.length > 0) {
+      size = parseInt(window.location.search.slice(1));
+    }
+    var allanchors = document.getElementsByTagName("a");
+    for(var ix = 0; ix < allanchors.length; ix++) {
+      if(allanchors[ix].getAttribute('href') == "?" + size) {
+        allanchors[ix].className = "selected";
+      }
+    }
+
     var imageContainer = $("image-container");
 
     for(y = 0; y < 768; y += size) {
@@ -79,7 +122,7 @@
           var delta = (+(new Date()) - epoch); 
           loadTime.push(delta);
           total += delta;
-          loadTime = loadTime.sort();
+          loadTime.sort(function(a,b){ return a - b});
  
           do_status();
         }
@@ -88,6 +131,7 @@
           do_status();
         }
         a.style.width = size + "px";
+        img.width = img.height = size;
         a.style.height = size + "px";
         a.appendChild(img);
 

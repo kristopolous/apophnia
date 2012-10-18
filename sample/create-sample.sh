@@ -1,24 +1,33 @@
 convert \
   -size 1024x768\
-  "xc:rgb(39,89,39)"\
-  -pointsize 300\
-  -fill "rgba(214,130,53,90)"\
-  -gravity center\
-  -annotate 0 "Sample" miff:- |\
+  "xc:rgb(40,120,30)"\
+  -fill "rgba(214,130,3,50)"\
+  -pointsize 200\
+  -gravity east\
+  -annotate 0x0-3+0 "Complex\nSample\nGraphic" miff:- |\
 convert miff:- \
   \(\
-    +clone\
-    +level-colors GREY50\
+    -size 64x768\
+    "xc:rgb(40,250,130)"\
     +noise Poisson\
     -colorspace Gray\
+    -resize 1024\!x768\!\
   \)\
   -compose Overlay\
   -composite miff:- |\
-  convert miff:- \
-    \(\
-      -size 1024x768\
-      gradient:green-yellow\
-    \)\
-    -compose Overlay\
-    -composite example.png
-
+convert miff:- \
+  \(\
+    -size 768x1024\
+    gradient:blue-olivedrab\
+    -rotate 90\
+  \)\
+  -compose Overlay\
+  -composite miff:- |\
+convert miff:- \
+  \(\
+    -size 1024x768\
+    gradient:darkblue-crimson\
+    +noise Poisson\
+  \)\
+  -compose Overlay\
+  -composite example.png
