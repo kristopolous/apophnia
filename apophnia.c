@@ -145,7 +145,7 @@ const struct {
     *fallbacks[8];
 
 } formatCheck[] = {
-  { "jpg", { "jpeg", "png", "bmp", "gif", "tga", "tiff", 0 } },
+  { "jpg", { "png", "gif", "bmp", "jpeg", "tga", "tiff", 0 } },
   { "png", { "gif", "bmp", "jpg", "jpeg", "tiff", 0 } },
   { "gif", { "png", "bmp", "jpg", "jpeg", 0 } },
   { "jpeg", { "jpg", "png", "bmp", "gif", "tga", "tiff", 0 } },
@@ -489,33 +489,44 @@ void *show_image(
     ret,
     fd = -1; 
 
+  const char* rfc1123fmt = "%a, %d %b %Y %H:%M:%S GMT";
   const struct mg_request_info *request_info = mg_get_request_info(conn);
+
   int formatOffset = 0;
 
   char 
     // index in the formatCheck for the fallback
     formatIndex = -1,
-    fname[PATH_MAX],
-    butcher[PATH_MAX],
-    buf[BUFSIZE],
+    fname[PATH_MAX] = {0},
+    butcher[PATH_MAX] = {0},
+    buf[BUFSIZE] = {0},
 
-    *commandList[12], 
+    *commandList[MAX_DIRECTIVES] = {0}, 
     **pCommand = commandList, 
     **pTmp,
 
     *ptr, 
     *last, 
-    *ext = 0;
+    *ext = 0,
+  
+    nowbuf[100] = {0},
+    modbuf[100] = {0},
+    expbuf[100] = {0};
 
   unsigned char *image;
 
   struct stat st;
+
   size_t sz;
-  const char* rfc1123fmt = "%a, %d %b %Y %H:%M:%S GMT";
-  time_t now, mod, expires;
-  char nowbuf[100];
-  char modbuf[100];
-  char expbuf[100];
+
+  time_t 
+    now, 
+    mod, 
+    expires;
+
+  if(event == MG_NEW_REQUEST) {
+    return (void*)0;
+  }
 
   if(event == MG_EVENT_LOG) {
     plog0("%s", mg_get_log_message(conn));
@@ -527,6 +538,7 @@ void *show_image(
   // first we try to just blindly open the requested file
   ptr = request_info->uri + 1;
   
+  printf("%s\n", request_info->uri);
   strcpy(fname, ptr);
   strcpy(butcher, ptr);
 
@@ -632,7 +644,7 @@ void *show_image(
 
     mg_printf(conn, "%s", "HTTP/1.1 200 OK\r\n");
     mg_printf(conn, "%s", "Content-Type: image/jpeg\r\n");
-    mg_printf(conn, "%s", "Connection: Keep-Alive\r\n");
+    //mg_printf(conn, "%s", "Connection: Keep-Alive\r\n");
 
     // add cache control headers
     now = time( (time_t*) 0 );
@@ -647,6 +659,7 @@ void *show_image(
       mg_printf(conn, "Last-Modified: %s\r\n", modbuf);
       mg_printf(conn, "Expires: %s\r\n", expbuf);
     }
+
     // if this is the case then we have a command string to parse
     if(pCommand != commandList) {
       
@@ -680,8 +693,6 @@ void *show_image(
 
       }
       image = image_end(wand, &sz);
-      mg_printf(conn, "Content-Length: %d\r\n\r\n", sz);
-      mg_write(conn, image, sz);
 
       // Only save the file unless disk is set to false.
       if (g_opts.b_disk) {
@@ -689,18 +700,20 @@ void *show_image(
       }
 
       MagickRelinquishMemory(image);
-    } else {
-      mg_printf(conn, "Content-Length: %d\r\n\r\n", (int) st.st_size);
+      fd = open(request_info->uri + 1, O_RDONLY);
+      plog2("%s %d\n", request_info->uri + 1, fd);
+      fstat(fd, &st);
+    }
+    mg_printf(conn, "Content-Length: %d\r\n\r\n", (int) st.st_size);
 
-      for(;;) {  
-        ret = read(fd, buf, BUFSIZE);
+    for(;;) {  
+      ret = read(fd, buf, BUFSIZE);
 
-        if(!ret) {
-          break;
-        }
-
-        mg_write(conn, buf, ret);
+      if(!ret) {
+        break;
       }
+
+      mg_write(conn, buf, ret);
     }
     close(fd);
     
@@ -710,8 +723,7 @@ void *show_image(
 
   DestroyMagickWand(wand);
 
-
-  return 0;
+  return (void*)1;
 }
 
 int read_config(){
@@ -880,6 +892,7 @@ int main() {
   {
     const char *options[] = {
       "listening_ports", itoa(g_opts.port),
+      "enable_keep_alive", "yes",
       NULL
     };
 
