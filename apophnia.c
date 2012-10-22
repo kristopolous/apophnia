@@ -165,7 +165,7 @@ void log_real(const char*t, ...) {
   va_start(ap, t);
 
   gettimeofday(&tp, 0);
-  printf("[ %d: %d.%06d ] ", (int) getpid(), (int) tp.tv_sec, (int) tp.tv_usec );
+  printf("[ %d.%06d ] ", (int) tp.tv_sec, (int) tp.tv_usec );
 
   while(*t) {
     if(*t == '%') {
@@ -524,8 +524,12 @@ void *show_image(
     mod, 
     expires;
 
-  if(event == MG_NEW_REQUEST) {
+  if(event == MG_REQUEST_COMPLETE) {
     return (void*)0;
+  }
+
+  if(event == MG_HTTP_ERROR) {
+    printf("HIT ERROR");
   }
 
   if(event == MG_EVENT_LOG) {
@@ -538,7 +542,6 @@ void *show_image(
   // first we try to just blindly open the requested file
   ptr = request_info->uri + 1;
   
-  printf("%s\n", request_info->uri);
   strcpy(fname, ptr);
   strcpy(butcher, ptr);
 
@@ -557,14 +560,6 @@ void *show_image(
     g_stat_check++;
 
     if(fd > 0) {
-      if (! (g_stat_check & 0x7F)) {
-        // get the stat of the open file handle
-        if(check_for_change(fd, ptr)) {
-          close(fd);
-        } else {
-          break;
-        }
-      }
       break;
     }
 
@@ -596,7 +591,7 @@ void *show_image(
         fname[last - ptr] = '.';
 
         strcpy(fname + (last - ptr + 1), ext);
-        plog3("Trying %s", fname);
+        //plog3("Trying %s", fname);
         fd = open(fname, O_RDONLY);
 
         if(fd > 0) {
@@ -622,7 +617,7 @@ void *show_image(
         ) {
           ext = formatCheck[formatIndex].fallbacks[formatOffset];
           strcpy(fname + (last - ptr + 1), ext);
-          plog3("Trying %s", fname);
+          //plog3("Trying %s", fname);
           fd = open(fname, O_RDONLY);
 
           if(fd > 0) {
@@ -671,7 +666,7 @@ void *show_image(
       //ext[0] = 0;
       image_start(wand, fd);
       for(pTmp = pCommand - 1; (pTmp + 1) != commandList; pTmp--) {
-        plog3("Command: [%s]", *pTmp);
+        // plog3("Command: [%s]", *pTmp);
 
         switch(*pTmp[0]) {
           case D_RESIZE:
@@ -701,7 +696,7 @@ void *show_image(
 
       MagickRelinquishMemory(image);
       fd = open(request_info->uri + 1, O_RDONLY);
-      plog2("%s %d\n", request_info->uri + 1, fd);
+      plog2("%s", request_info->uri + 1);
       fstat(fd, &st);
     }
     mg_printf(conn, "Content-Length: %d\r\n\r\n", (int) st.st_size);
@@ -713,7 +708,7 @@ void *show_image(
         break;
       }
 
-      mg_write(conn, buf, ret);
+      ret = mg_write(conn, buf, ret);
     }
     close(fd);
     
