@@ -481,7 +481,6 @@ int image_resize(MagickWand *wand, char*ptr) {
 }
 
 void *show_image(
-    enum mg_event event,
     struct mg_connection *conn
   ) {
 
@@ -524,19 +523,6 @@ void *show_image(
     mod, 
     expires;
 
-  if(event == MG_REQUEST_COMPLETE) {
-    return (void*)0;
-  }
-
-  if(event == MG_HTTP_ERROR) {
-    printf("HIT ERROR");
-  }
-
-  if(event == MG_EVENT_LOG) {
-    plog0("%s", mg_get_log_message(conn));
-    return (void*)0;
-  }
-        
   MagickWand *wand = NewMagickWand();
   
   // first we try to just blindly open the requested file
@@ -870,6 +856,20 @@ void sighandle(int which) {
   longjmp(g_jump_buf, 1);
 }
 
+// oh wow, don't we all love C.
+const struct mg_callbacks mongoose_cb = {
+    show_image, // begin_request
+    0,  // end_request
+    0,  // log_message
+    0,  // init_ssl
+    0,  // websocket_connect
+    0,  // websocket_ready
+    0,  // websocket_data
+    0,  // open_file
+    0,  // init_lua
+    0   // upload
+};
+
 int main() {
   struct mg_context *ctx;
 
@@ -892,7 +892,13 @@ int main() {
     };
 
     plog3("Listening on port %d", g_opts.port);
-    ctx = mg_start(&show_image, NULL, options);
+
+    ctx = mg_start(
+      &mongoose_cb,
+      NULL, 
+      options
+    );
+
     if (!ctx) {
       plog0("Errors encountered. Exiting...");
       return 0;
