@@ -1,8 +1,8 @@
 ## What is apophnia
 
-Apophnia is a dedicated image server.  Designed to solve all of the common image serving problems that are a pain to deal with for anyone that has a large web presence.
+Apophnia is a dedicated image server protocol.  This is designed to solve all of the common image serving problems that are a pain to deal with for anyone that has a large web presence.
 
-**This does not serve HTML, CSS, JAVASCRIPT, or any other kind of document. It just serves images.**
+**This is not intended to serve HTML, CSS, JAVASCRIPT, or any other kind of document. It just serves images.**
 
 # Image Serving Problems
 
@@ -81,6 +81,15 @@ Much better the second time around, eh?
 
 The config file is called apophnia.conf and is in "JSON":http://www.json.org/ format. 
 
+# Implementations
+
+There is a protocol (discussed above) and implementations (discussed below).  The following implementations exist:
+
+  * C/ImageMagick/Mongoose
+<!--  * PHP/ImageMagick/(Your choice)-->
+
+
+## C Implementation
 ### Supported Options
 * `"port": INTEGER` - default: 2345
   The port to run apophnia on.
