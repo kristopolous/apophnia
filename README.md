@@ -1,6 +1,6 @@
 ## What is apophnia
 
-Apophnia is a dedicated image server protocol.  This is designed to solve all of the common image serving problems that are a pain to deal with for anyone that has a large web presence.
+Apophnia is a dedicated image server protocol.  This is designed to solve all of the common image serving problems that are a pain to deal with for anyone that has to deal with a lot of images.
 
 **This is not intended to serve HTML, CSS, JAVASCRIPT, or any other kind of document. It just serves images.**
 
@@ -88,6 +88,13 @@ There is a protocol (discussed above) and implementations (discussed below).  Th
   * C/ImageMagick/Mongoose
 <!--  * PHP/ImageMagick/(Your choice)-->
 
+Implementations intend to achieve the following goals:
+
+  * Manage the request to convert images
+  * Convert source images to destination format
+  * Cache images for future use
+  * Update cache when necessary
+  * Discard old images from cache
 
 ## C Implementation
 ### Supported Options
